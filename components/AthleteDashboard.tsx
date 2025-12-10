@@ -16,7 +16,10 @@ const AthleteDashboard: React.FC<AthleteDashboardProps> = ({ athlete }) => {
   // 2. Moved these hooks INSIDE the component
   const [assignedCoachId, setAssignedCoachId] = useState<string>('');
   const [assignedTrainerId, setAssignedTrainerId] = useState<string>('');
-  
+  // FIXED: Added missing coachName state
+  const [coachName, setCoachName] = useState('Head Coach'); 
+  const [trainerName, setTrainerName] = useState('Athletic Trainer');
+
   const [selectedPart, setSelectedPart] = useState<BodyPart | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTrainingModalOpen, setIsTrainingModalOpen] = useState(false);
@@ -38,7 +41,7 @@ const AthleteDashboard: React.FC<AthleteDashboardProps> = ({ athlete }) => {
     const fetchInitialData = async () => {
       if(!athlete?.id) return;
 
-      // 1. Fetch Staff info for Chat
+      // 1. Fetch Staff Info
       const { data: staffData } = await supabase.from('profiles').select('id, name, role').in('role', ['COACH', 'TRAINER']);
       if (staffData) {
           const coach = staffData.find(u => u.role === 'COACH');
@@ -50,8 +53,15 @@ const AthleteDashboard: React.FC<AthleteDashboardProps> = ({ athlete }) => {
       // 2. Fetch Injuries
       const { data: inj } = await supabase.from('injuries').select('*').eq('athlete_id', athlete.id).order('date_logged', {ascending: false});
       if(inj) {
+          // IMPORTANT: Map database (snake_case) to app (camelCase)
           setMyInjuries(inj.map((i: any) => ({
-              ...i, athleteId: i.athlete_id, bodyPart: i.body_part, painType: i.pain_type, dateLogged: i.date_logged, severityHistory: i.severity_history || [], activityLog: i.activity_log || []
+              ...i, 
+              athleteId: i.athlete_id, 
+              bodyPart: i.body_part, 
+              painType: i.pain_type, 
+              dateLogged: i.date_logged, 
+              severityHistory: i.severity_history || [], 
+              activityLog: i.activity_log || []
           })));
       }
 
@@ -160,62 +170,26 @@ const handlePartSelect = (part: BodyPart) => {
       activity_log: []
     };
 
-    const { data: inserted, error } = await supabase
-        .from('injuries')
-        .insert([newLog])
-        .select()
-        .single();
-
-    if (inserted && !error) {
-         const mapped = {
-            ...inserted,
-            athleteId: inserted.athlete_id,
-            bodyPart: inserted.body_part,
-            painType: inserted.pain_type,
-            dateLogged: inserted.date_logged,
-            severityHistory: inserted.severity_history,
-            activityLog: inserted.activity_log
-         };
-         setMyInjuries([mapped, ...myInjuries]);
-    }
+    // ONLY Insert. The Realtime listener will handle the UI update.
+    await supabase.from('injuries').insert([newLog]);
   };
 // --- FUNCTION 1: SAVES NOTES & PROGRESS ---
   const handleAddActivity = async (injuryId: string, activity: any) => {
-    // 1. Find the injury in local state to get current logs
     const injury = myInjuries.find(i => i.id === injuryId);
     if (!injury) return;
 
-    // 2. Create the new log object
     const newActivity = {
         id: `act_${Date.now()}`,
         date: new Date().toISOString(),
-        authorName: athlete.name, // Real name
-        authorRole: Role.ATHLETE, // Real role
-        ...activity // Contains 'content', 'type', 'progress'
+        authorName: athlete.name,
+        authorRole: Role.ATHLETE,
+        ...activity
     };
     
-    // 3. Prepend to existing logs (Newest first)
     const updatedLogs = [newActivity, ...injury.activityLog];
     
-    // 4. Update Supabase
-    const { error } = await supabase
-        .from('injuries')
-        .update({ activity_log: updatedLogs }) // Save the whole JSON array
-        .eq('id', injuryId);
-    
-    // 5. Update Local State (So you see it immediately without refreshing)
-    if (!error) {
-           const updatedList = myInjuries.map(i => {
-               if (i.id === injuryId) {
-                   const updated = { ...i, activityLog: updatedLogs };
-                   // Also update the modal view if it's open
-                   if (selectedInjury?.id === injuryId) setSelectedInjury(updated);
-                   return updated;
-               }
-               return i;
-           });
-           setMyInjuries(updatedList);
-    }
+    // ONLY Update DB. Realtime handles the rest.
+    await supabase.from('injuries').update({ activity_log: updatedLogs }).eq('id', injuryId);
   };
 // --- FUNCTION 2: UPDATES STATUS & RECOVERY CHART ---
   const handleUpdateInjury = async (injuryId: string, updates: Partial<InjuryLog>) => {
@@ -271,16 +245,8 @@ const handlePartSelect = (part: BodyPart) => {
       notes: data.notes
     };
     
-    const { data: inserted } = await supabase.from('training_logs').insert([newLog]).select().single();
-    if(inserted) {
-        const mapped = {
-            ...inserted,
-            athleteId: inserted.athlete_id,
-            durationMinutes: inserted.duration_minutes,
-            stressLevel: inserted.stress_level
-        };
-        setMyTrainingLogs([mapped, ...myTrainingLogs]);
-    }
+    // Only insert. Realtime handles the rest.
+    await supabase.from('training_logs').insert([newLog]);
   };
 
   // --- FUNCTION 3: REAL CHAT MESSAGING ---
@@ -524,11 +490,4 @@ const handlePartSelect = (part: BodyPart) => {
 };
 
 export default AthleteDashboard;
-
-function setCoachName(arg0: any) {
-  throw new Error('Function not implemented.');
-}
-function setTrainerName(arg0: any) {
-  throw new Error('Function not implemented.');
-}
 
