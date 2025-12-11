@@ -9,8 +9,7 @@ import SignUpPage from './components/SignUpPage';
 
 const App: React.FC = () => {
   const [currentRole, setCurrentRole] = useState<Role | null>(null);
-  const [authStep, setAuthStep] = useState<'LOADING' | 'LANDING' | 'LOGIN' | 'REGISTER' | 'AUTHENTICATED'>('LOADING');
-  
+  const [authStep, setAuthStep] = useState<'LOADING' | 'LANDING' | 'LOGIN' | 'REGISTER' | 'APPROVAL_PENDING' | 'AUTHENTICATED'>('LOADING');  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -61,9 +60,19 @@ const App: React.FC = () => {
 
       if (error || !data) {
         console.error("Profile not found");
-        await supabase.auth.signOut(); // Force signout if profile is missing
+        await supabase.auth.signOut(); 
         setAuthStep('LANDING');
         return;
+      }
+
+      // --- NEW: CHECK APPROVAL STATUS ---
+      // If they are an athlete and NOT approved, block access
+      if (data.role === 'ATHLETE' && !data.is_approved) {
+        setAuthStep('APPROVAL_PENDING');
+        // We still set these so we can show their name on the waiting screen if needed
+        setUserId(data.id);
+        setAthleteData(data);
+        return; 
       }
 
       setUserId(data.id);
@@ -103,7 +112,22 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    try {
+      // Attempt standard sign out
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Logout error:", error);
+    } finally {
+      // Force local cleanup regardless of server response
+      // This ensures the user is never stuck in a "zombie" logged-in state
+      setAuthStep('LANDING');
+      setUserId(null);
+      setCurrentRole(null);
+      setAthleteData(null);
+      
+      // Optional: Clear local storage manually if Supabase fails to do so
+      localStorage.clear(); 
+    }
   };
 
   // --- RENDERING ---
@@ -168,22 +192,62 @@ const App: React.FC = () => {
       </div>
     );
   }
-
+  if (authStep === 'APPROVAL_PENDING') {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500"></div>
+          <div className="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Lock className="text-yellow-500 w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Access Restricted</h2>
+          <p className="text-zinc-400 mb-6">
+            Your account has been created, but you have not been approved by your Head Coach yet.
+          </p>
+          <div className="bg-zinc-950 border border-zinc-800 p-4 rounded-lg mb-6 text-sm text-zinc-500">
+            Please contact your coach and tell them to approve 
+            <span className="text-white font-bold block mt-1">{athleteData?.name || 'your account'}</span>
+          </div>
+          <button 
+            onClick={handleLogout} 
+            className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg font-medium transition-colors"
+          >
+            Log Out
+          </button>
+        </div>
+      </div>
+    );
+  }
   // AUTHENTICATED STATE
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans flex flex-col">
-      <nav className="border-b border-zinc-800 bg-zinc-900/50 p-4 flex justify-between items-center sticky top-0 z-40">
+    <div className="h-screen bg-zinc-950 text-zinc-100 font-sans flex flex-col overflow-hidden">
+      {/* 
+         FIX: Changed bg-zinc-900/50 to bg-zinc-900/95 with backdrop-blur 
+         This stops content from looking "messy" when scrolling under it.
+      */}
+      <nav className="border-b border-zinc-800 bg-zinc-900/95 backdrop-blur-xl p-4 flex justify-between items-center z-40 flex-shrink-0">
         <div className="font-bold text-xl">Athletix<span className="text-emerald-500">Pro</span></div>
-        <button onClick={handleLogout} className="text-sm text-zinc-400 hover:text-white flex items-center gap-2"><LogOut size={16} /> Logout</button>
+        <button onClick={handleLogout} className="text-sm text-zinc-400 hover:text-white flex items-center gap-2">
+            <LogOut size={16} /> <span className="hidden sm:inline">Logout</span>
+        </button>
       </nav>
-      <main className="flex-1 w-full overflow-hidden">
+      
+      {/* 
+         FIX: Removed 'overflow-hidden' from main to let specific dashboards handle their own scroll 
+         or inherit correctly.
+      */}
+      <main className="flex-1 w-full relative overflow-hidden">
          {currentRole === Role.ATHLETE ? (
-           <AthleteDashboard athlete={athleteData} />
+           // Athlete dashboard needs its own scroll container
+           <div className="h-full overflow-y-auto">
+             <AthleteDashboard athlete={athleteData} />
+           </div>
          ) : (
            <CoachDashboard 
               currentUserRole={currentRole!} 
               currentUserId={userId} 
-              currentUserName={athleteData?.name || 'Staff'} 
+              currentUserName={athleteData?.name || 'Staff'}
+              userProfile={athleteData} 
            />
          )}
       </main>

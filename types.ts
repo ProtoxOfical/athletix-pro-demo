@@ -58,18 +58,44 @@ export interface InjuryLog {
   activityLog: ActivityLog[]; // Replaces aiAdvice with a conversation/treatment history
 }
 
+export interface Team {
+  id: string;
+  name: string;
+  sport: string;
+  joinCode: string;
+  coachId: string;
+  requiresApproval: boolean;
+}
+
+// Update User to include approval status
 export interface User {
   id: string;
   name: string;
   role: Role;
+  email?: string;
+  dob?: string;
   avatarUrl?: string;
+  isApproved?: boolean; // NEW
+  teamId?: string;      // NEW
+  // Common fields
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
 }
 
 export interface AthleteProfile extends User {
   role: Role.ATHLETE;
-  sport: string;
-  team: string;
+  // We keep 'sport' and 'team' (string) for display, 
+  // but logically we now rely on teamId
+  sport: string; 
+  team: string; 
   status: 'Healthy' | 'Injured' | 'Recovery';
+  year?: string;
+  // Medical Specifics
+  medications?: string;
+  allergies?: string;
+  medicalAllergies?: string;
+  insuranceProvider?: string;
+  insurancePolicyNumber?: string;
 }
 
 export interface TrainingLog {

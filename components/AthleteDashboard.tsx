@@ -4,6 +4,8 @@ import InjuryModal from './InjuryModal';
 import InjuryDetailsModal from './InjuryDetailsModal';
 import TrainingModal from './TrainingModal';
 import ChatArea from './ChatArea';
+import { Settings } from 'lucide-react'; // Add Settings icon
+import ProfileSettingsModal from './ProfileSettingsModal';
 import { BodyPart, InjuryLog, AthleteProfile, TrainingLog, Message, Role, ActivityLog } from '../types';
 // REMOVED MOCKS
 import { Plus, History, Activity, MessageSquare, Dumbbell, X, ClipboardList, Stethoscope, User } from 'lucide-react';
@@ -16,6 +18,7 @@ const AthleteDashboard: React.FC<AthleteDashboardProps> = ({ athlete }) => {
   // 2. Moved these hooks INSIDE the component
   const [assignedCoachId, setAssignedCoachId] = useState<string>('');
   const [assignedTrainerId, setAssignedTrainerId] = useState<string>('');
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   // FIXED: Added missing coachName state
   const [coachName, setCoachName] = useState('Head Coach'); 
   const [trainerName, setTrainerName] = useState('Athletic Trainer');
@@ -170,8 +173,14 @@ const handlePartSelect = (part: BodyPart) => {
       activity_log: []
     };
 
-    // ONLY Insert. The Realtime listener will handle the UI update.
-    await supabase.from('injuries').insert([newLog]);
+    // 1. Insert the Injury Log
+    const { error } = await supabase.from('injuries').insert([newLog]);
+
+    // 2. FIX: Automatically set Athlete Status to 'Recovery' (Yellow/Active)
+    // This ensures they appear as "Injured (Active)" in the roster immediately.
+    if (!error) {
+       await supabase.from('profiles').update({ status: 'Recovery' }).eq('id', athlete.id);
+    }
   };
 // --- FUNCTION 1: SAVES NOTES & PROGRESS ---
   const handleAddActivity = async (injuryId: string, activity: any) => {
@@ -273,7 +282,17 @@ const handlePartSelect = (part: BodyPart) => {
       <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-white mb-1">Welcome back, {athlete.name}</h1>
-          <p className="text-zinc-400 text-sm md:text-base">Team {athlete.team} • {athlete.sport}</p>
+          
+          {/* REPLACE the subtitle with this row that includes the settings button */}
+          <div className="flex items-center gap-4">
+              <p className="text-zinc-400 text-sm md:text-base">Team {athlete.team} • {athlete.sport}</p>
+              <button 
+                onClick={() => setIsProfileOpen(true)}
+                className="text-zinc-500 hover:text-emerald-400 transition-colors flex items-center gap-1 text-xs font-bold uppercase tracking-wider"
+              >
+                 <Settings size={14} /> Profile Settings
+              </button>
+          </div>
         </div>
         
         <div className="flex flex-wrap items-center gap-3 md:gap-4">
@@ -484,6 +503,14 @@ const handlePartSelect = (part: BodyPart) => {
         isOpen={isTrainingModalOpen}
         onClose={() => setIsTrainingModalOpen(false)}
         onSave={handleSaveTraining}
+      />
+      <ProfileSettingsModal 
+          isOpen={isProfileOpen}
+          onClose={() => setIsProfileOpen(false)}
+          userProfile={athlete}
+          onProfileUpdate={(updated) => {
+             // Local update logic if needed, though App.tsx listener usually handles it
+          }}
       />
     </div>
   );

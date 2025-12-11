@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { Role } from '../types';
-import { Shield, ArrowRight, User, Lock, ArrowLeft } from 'lucide-react';
+import { Shield, User, Lock, ArrowLeft, Users } from 'lucide-react';
 
 interface SignUpPageProps {
   onBack: () => void;
@@ -18,19 +18,44 @@ const SignUpPage: React.FC<SignUpPageProps> = ({ onBack, onSuccess }) => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dob, setDob] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState('');
   
   // Athlete Specific
-  const [team, setTeam] = useState('');
-  const [sport, setSport] = useState('');
+  const [joinCode, setJoinCode] = useState('');
   const [year, setYear] = useState('Freshman');
+
+  // Coach Specific
+  const [newTeamName, setNewTeamName] = useState('');
+  const [newTeamSport, setNewTeamSport] = useState('');
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      // 1. Create User in Supabase Secure Auth
+      let assignedTeamId = null;
+      let teamNameString = null;
+      let sportString = null;
+      let requiresApproval = false;
+
+      // 1. If Athlete, validate the Code FIRST
+      if (role === Role.ATHLETE) {
+        const { data: teamData, error: teamError } = await supabase
+          .from('teams')
+          .select('*')
+          .eq('join_code', joinCode)
+          .single();
+
+        if (teamError || !teamData) {
+          throw new Error("Invalid Team Join Code. Please ask your coach for the correct code.");
+        }
+
+        assignedTeamId = teamData.id;
+        teamNameString = teamData.name;
+        sportString = teamData.sport;
+        requiresApproval = teamData.requires_approval;
+      }
+
+      // 2. Create User in Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -39,25 +64,48 @@ const SignUpPage: React.FC<SignUpPageProps> = ({ onBack, onSuccess }) => {
       if (authError) throw authError;
       if (!authData.user) throw new Error("No user created");
 
-      // 2. Create Profile entry linked to the Auth ID
+      // 3. Create Profile
       const fullName = `${firstName} ${lastName}`;
       
       const newProfile = {
-        id: authData.user.id, // IMPORTANT: Link to the Secure User ID
+        id: authData.user.id,
         email: email,
         name: fullName,
         role: role,
         dob: dob,
-        avatar_url: avatarUrl || `https://ui-avatars.com/api/?name=${firstName}+${lastName}&background=random`,
-        team: role === Role.ATHLETE ? team : null,
-        sport: role === Role.ATHLETE ? sport : null,
+        avatar_url: `https://ui-avatars.com/api/?name=${firstName}+${lastName}&background=random`,
+        
+        // Athlete Logic
+        team_id: role === Role.ATHLETE ? assignedTeamId : null,
+        team: role === Role.ATHLETE ? teamNameString : null, // Legacy string
+        sport: role === Role.ATHLETE ? sportString : null,    // Legacy string
         year: role === Role.ATHLETE ? year : null,
-        status: 'Healthy'
+        status: 'Healthy',
+        
+        // Approval Logic
+        // Coaches/Trainers auto-approved for now (or you can restrict them later)
+        // Athletes are approved ONLY if the team doesn't require it
+        is_approved: role === Role.ATHLETE ? !requiresApproval : true 
       };
 
       const { error: profileError } = await supabase.from('profiles').insert([newProfile]);
-
       if (profileError) throw profileError;
+
+      // 4. If Coach, Create the Team immediately
+      if (role === Role.COACH) {
+        // Generate a random 6-char code
+        const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+        
+        const { error: teamCreateError } = await supabase.from('teams').insert([{
+          coach_id: authData.user.id,
+          name: newTeamName,
+          sport: newTeamSport,
+          join_code: code,
+          requires_approval: true // Default to requiring approval
+        }]);
+
+        if (teamCreateError) throw teamCreateError;
+      }
 
       alert("Account created! You can now log in.");
       onSuccess(email);
@@ -78,7 +126,7 @@ const SignUpPage: React.FC<SignUpPageProps> = ({ onBack, onSuccess }) => {
 
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white mb-2">Create Account</h1>
-          <p className="text-zinc-500 text-sm">Secure Sign Up</p>
+          <p className="text-zinc-500 text-sm">Join your team or create a new one.</p>
         </div>
 
         <div className="bg-zinc-900/80 border border-zinc-800 p-8 rounded-2xl shadow-xl">
@@ -117,41 +165,73 @@ const SignUpPage: React.FC<SignUpPageProps> = ({ onBack, onSuccess }) => {
               </div>
             </div>
 
-            {/* ATHLETE SPECIFIC */}
+            {/* ATHLETE: JOIN TEAM */}
             {role === Role.ATHLETE && (
-              <div className="p-4 bg-zinc-950/50 rounded-xl border border-zinc-800 space-y-3">
-                 <div>
-                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Team Name</label>
-                    <input required type="text" placeholder="e.g. Varsity Sprinters" value={team} onChange={e => setTeam(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm" />
+              <div className="p-4 bg-blue-900/10 border border-blue-500/30 rounded-xl space-y-3">
+                 <div className="flex items-center gap-2 mb-1">
+                    <Users className="text-blue-400" size={16} />
+                    <span className="text-xs font-bold text-blue-400 uppercase">Join Team</span>
                  </div>
-                 <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Sport</label>
-                        <input required type="text" placeholder="e.g. Track" value={sport} onChange={e => setSport(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm" />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Year</label>
-                        <select value={year} onChange={e => setYear(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm">
-                            <option>Freshman</option>
-                            <option>Sophomore</option>
-                            <option>Junior</option>
-                            <option>Senior</option>
-                        </select>
-                    </div>
+                 <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Team Code</label>
+                    <input 
+                      required 
+                      type="text" 
+                      placeholder="Enter code (e.g. TITANS)" 
+                      value={joinCode} 
+                      onChange={e => setJoinCode(e.target.value.toUpperCase())} 
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm tracking-widest font-mono uppercase" 
+                    />
+                    <p className="text-[10px] text-zinc-500 mt-1">Get this code from your Coach.</p>
+                 </div>
+                 <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Year</label>
+                    <select value={year} onChange={e => setYear(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm">
+                        <option>Freshman</option>
+                        <option>Sophomore</option>
+                        <option>Junior</option>
+                        <option>Senior</option>
+                    </select>
                  </div>
               </div>
             )}
 
-            {/* DOB & PIC */}
-            <div className="grid grid-cols-2 gap-4">
-                 <div>
-                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Date of Birth</label>
-                    <input required type="date" value={dob} onChange={e => setDob(e.target.value)} className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm" />
+            {/* COACH: CREATE TEAM */}
+            {role === Role.COACH && (
+              <div className="p-4 bg-emerald-900/10 border border-emerald-500/30 rounded-xl space-y-3">
+                 <div className="flex items-center gap-2 mb-1">
+                    <Shield className="text-emerald-400" size={16} />
+                    <span className="text-xs font-bold text-emerald-400 uppercase">Create New Team</span>
                  </div>
                  <div>
-                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Photo URL</label>
-                    <input type="text" placeholder="https://..." value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm" />
+                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Team Name</label>
+                    <input 
+                      required 
+                      type="text" 
+                      placeholder="e.g. Varsity Football" 
+                      value={newTeamName} 
+                      onChange={e => setNewTeamName(e.target.value)} 
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm" 
+                    />
                  </div>
+                 <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Sport</label>
+                    <input 
+                      required 
+                      type="text" 
+                      placeholder="e.g. Football" 
+                      value={newTeamSport} 
+                      onChange={e => setNewTeamSport(e.target.value)} 
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm" 
+                    />
+                 </div>
+              </div>
+            )}
+
+            {/* DOB */}
+            <div>
+               <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Date of Birth</label>
+               <input required type="date" value={dob} onChange={e => setDob(e.target.value)} className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm" />
             </div>
 
             {/* CREDENTIALS */}
@@ -170,7 +250,7 @@ const SignUpPage: React.FC<SignUpPageProps> = ({ onBack, onSuccess }) => {
             </div>
 
             <button type="submit" disabled={isLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 mt-4 transition-all">
-              {isLoading ? "Creating..." : <><Shield size={18} /> Create Secure Account</>}
+              {isLoading ? "Creating..." : <><Shield size={18} /> Create Account</>}
             </button>
 
           </form>
